@@ -35,6 +35,202 @@
       <br>
       <h1>grand mother</h1>
       <h4>girija</h4>
+       <div class="container">
+        <h1 class="text-4xl font-extrabold text-center mb-4 text-white drop-shadow-lg">
+            AI Image Generator
+        </h1>
+
+        <div id="userIdDisplay" class="text-sm text-gray-200 mb-2 hidden">
+            Your User ID: <span id="userIdValue" class="font-semibold"></span>
+        </div>
+
+        <div class="w-full">
+            <textarea
+                id="promptInput"
+                rows="4"
+                placeholder="Enter your image prompt here (e.g., 'A futuristic city at sunset, cyberpunk style')"
+                class="w-full"
+            ></textarea>
+        </div>
+
+        <button id="generateButton">
+            <svg id="loadingSpinner" class="animate-spin h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span id="buttonText">Generate Image</span>
+        </button>
+
+        <div id="errorMessage" class="error-message hidden"></div>
+
+        <div id="imageContainer" class="w-full flex justify-center mt-6 hidden">
+            <img id="generatedImage" alt="Generated" class="max-w-full h-auto" />
+        </div>
+
+        <div class="attribution">
+            <p>&copy; <span id="currentYear"></span> Srujan. All rights reserved.</p>
+            <p>Made with ❤️ by Srujan</p>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // DOM Elements
+        const promptInput = document.getElementById('promptInput');
+        const generateButton = document.getElementById('generateButton');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const buttonText = document.getElementById('buttonText');
+        const errorMessage = document.getElementById('errorMessage');
+        const imageContainer = document.getElementById('imageContainer');
+        const generatedImage = document.getElementById('generatedImage');
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const userIdValue = document.getElementById('userIdValue');
+        const currentYearSpan = document.getElementById('currentYear');
+
+        // Global Firebase instances
+        let db;
+        let auth;
+        let currentUserId = null;
+
+        // --- Firebase Initialization ---
+        const initializeFirebase = async () => {
+            try {
+                // Ensure __firebase_config is defined and parse it
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Sign in with custom token or anonymously
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                    console.log("Signed in with custom token.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously.");
+                }
+
+                // Listen for auth state changes to get the user ID
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUserId = user.uid;
+                        userIdValue.textContent = currentUserId;
+                        userIdDisplay.classList.remove('hidden');
+                    } else {
+                        // Fallback for unauthenticated users, generate a random ID
+                        currentUserId = crypto.randomUUID();
+                        userIdValue.textContent = currentUserId;
+                        userIdDisplay.classList.remove('hidden');
+                    }
+                });
+            } catch (err) {
+                console.error("Error initializing Firebase:", err);
+                showError("Failed to initialize Firebase. Please try again later.");
+            }
+        };
+
+        // --- UI Utility Functions ---
+        const setLoadingState = (isLoading) => {
+            generateButton.disabled = isLoading || !promptInput.value.trim();
+            if (isLoading) {
+                loadingSpinner.classList.remove('hidden');
+                buttonText.textContent = 'Generating...';
+                errorMessage.classList.add('hidden');
+                imageContainer.classList.add('hidden');
+                generatedImage.src = '';
+            } else {
+                loadingSpinner.classList.add('hidden');
+                buttonText.textContent = 'Generate Image';
+            }
+        };
+
+        const showError = (message) => {
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+        };
+
+        const showImage = (url) => {
+            generatedImage.src = url;
+            imageContainer.classList.remove('hidden');
+            generatedImage.onerror = () => {
+                generatedImage.src = "https://placehold.co/400x300/cccccc/333333?text=Image+Load+Error";
+            };
+        };
+
+        // --- Image Generation Logic ---
+        const generateImage = async () => {
+            const prompt = promptInput.value.trim();
+            if (!prompt) {
+                showError('Please enter a prompt to generate an image.');
+                return;
+            }
+
+            setLoadingState(true);
+            errorMessage.classList.add('hidden');
+            imageContainer.classList.add('hidden');
+
+            try {
+                const payload = { instances: { prompt: prompt }, parameters: { "sampleCount": 1 } };
+                const apiKey = ""; // API key is provided by the environment
+
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.predictions && result.predictions.length > 0 && result.predictions[0].bytesBase64Encoded) {
+                    const generatedImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+                    showImage(generatedImageUrl);
+
+                    // Save to Firestore
+                    if (db && currentUserId) {
+                        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                        const imagesCollectionRef = collection(db, `artifacts/${appId}/users/${currentUserId}/generated_images`);
+                        await addDoc(imagesCollectionRef, {
+                            prompt: prompt,
+                            imageUrl: generatedImageUrl,
+                            timestamp: new Date()
+                        });
+                        console.log("Image data saved to Firestore.");
+                    } else {
+                        console.warn("Firestore not initialized or userId not available. Image data not saved.");
+                    }
+                } else {
+                    showError('Failed to generate image. Please try again.');
+                    console.error('Image generation failed:', result);
+                }
+            } catch (err) {
+                showError('An error occurred during image generation.');
+                console.error('Error generating image:', err);
+            } finally {
+                setLoadingState(false);
+            }
+        };
+
+        // --- Event Listeners ---
+        generateButton.addEventListener('click', generateImage);
+        promptInput.addEventListener('input', () => {
+            // Enable/disable button based on prompt content
+            generateButton.disabled = loadingSpinner.classList.contains('hidden') && !promptInput.value.trim();
+        });
+
+        // --- Initial Setup on Window Load ---
+        window.onload = () => {
+            initializeFirebase();
+            currentYearSpan.textContent = new Date().getFullYear(); // Set current year for copyright
+            // Initial button state
+            generateButton.disabled = !promptInput.value.trim();
+        };
+    </script>
       </center>
   </body>
 </html>
